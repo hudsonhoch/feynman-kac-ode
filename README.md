@@ -29,4 +29,4 @@ A^{\top}(t)D(t)+\dot{D}(t)&=-h(t). \\
 \end{align}
 $$
 
-For an example on how to use this implementation, see the example.ipynb file.
+For an example on how to use this implementation, see the [example.ipynb](https://github.com/hudsonhoch/feynman-kac-ode/blob/main/example.ipynb) file.
