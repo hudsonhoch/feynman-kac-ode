@@ -20,13 +20,6 @@ $$
 dX(t)=\Big[A(t)X(t)+D(t)\Big]dt+dB(t)
 $$
 
-where $A(t)$ and $D(t)$ solve
-
-$$
-\begin{align}
-A^{\top}(t)A(t)+\dot{A}(t)&=-g(t) \\
-A^{\top}(t)D(t)+\dot{D}(t)&=-h(t). \\
-\end{align}
-$$
+where $A(t)$ and $D(t)$ solve a system of first order system of ODEs defined by $g(t)$ and $h(t)$.
 
 For an example on how to use this implementation, see the [example.ipynb](https://github.com/hudsonhoch/feynman-kac-ode/blob/main/example.ipynb) file.
