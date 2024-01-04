@@ -2,9 +2,8 @@ from typing import Callable
 
 import numpy as np
 import scipy.stats as stats
-import scipy.linalg as slinalg
-from scipy.integrate import quad, quad_vec
-from scipy.optimize import minimize
+from scipy.integrate import quad, quad_vec, solve_ivp
+from scipy.optimize import minimize, root
 
 
 class DiffusionODESolver:
@@ -17,7 +16,7 @@ class DiffusionODESolver:
             D: Callable[[float], np.ndarray],
             V: Callable[[float], np.ndarray] = None,
             phi: Callable[[float,float], np.ndarray] = None
-        ):
+    ):
         A0 = A(0)
         D0 = D(0)
 
@@ -45,23 +44,28 @@ class DiffusionODESolver:
             self.phi = phi
 
 
+    def _mu_integrand(self, u, t):
+        return self.phi(u,t) @ self.D(u)
+    
+
+    def _var_integrand(self, u, t):
+        p = self.phi(u,t)
+        return p.T @ p
+
+
     def mu(self, t: float, y: np.ndarray, s: float) -> np.ndarray:
         term1 = self.phi(s,t) @ y
-        integrand = lambda u: self.phi(u,t) @ self.D(u)
-        term2 = quad_vec(integrand, s, t)[0]
+        term2 = quad_vec(self._mu_integrand, s, t, args=(t,))[0]
         return term1 + term2
 
 
     def var(self, t: float, y: np.ndarray, s: float):
-        def integrand(u):
-            p = self.phi(u,t)
-            return p.T @ p
-        return quad_vec(integrand, s, t)[0]
+        return quad_vec(self._var_integrand, s, t, args=(t,))[0]
     
 
     def transition(self, x: np.ndarray, t: float, y: np.ndarray, s: float) -> float:
         variance = self.var(t,y,s)
-        mean = self.mu_(t,y,s)
+        mean = self.mu(t,y,s)
         denom = np.sqrt(2*np.pi*variance)
         exp = np.exp(-(x - mean)**2 / (2*variance))
         return exp/denom
@@ -114,15 +118,63 @@ class DiffusionODESolver:
         dt = times[1]
 
         Yt = np.zeros((self.N,1,npoints))
-        weight = np.empty((npoints-1, self.N, self.N))
+        # weight = np.empty((npoints-1, self.N, self.N))
         for i,t in enumerate(times[:-1],1):
             y = Yt[:,:,i-1]
-            weight[i-1] = slinalg.expm(self.V(t))
+            # weight[i-1] = slinalg.expm(self.V(t))
             Yt[:,:,i] = y + self._deterministic_bridge_step(y,t) * dt
 
-        Yt[:,:,:-1] = np.einsum('kij,jmk->imk', weight, Yt[:,:,:-1])
+        # Yt[:,:,:-1] = np.einsum('kij,jmk->imk', weight, Yt[:,:,:-1])
         Yt[:,0,[-1]] = self.yT
-        return times, Yt[:,0,:] 
+        return times, Yt[:,0,:]
+    
+
+
+
+class ShootingMethodSolver:
+
+    def __init__(
+            self,
+            g: Callable[[float], np.ndarray],
+            h: Callable[[float], np.ndarray],
+            T: float,
+            yT: np.ndarray,
+            ode_solver: str = 'RK45'
+    ):
+        g0 = g(0)
+        h0 = h(0)
+        assert g0.shape[0] == h0.shape[0]
+        assert g0.shape[1] == h0.shape[0]
+        assert h0.shape[1] == 1
+        self.g = g
+        self.h = h
+        self.N = g0.shape[0]  # size of system
+        self.T = T # end point
+        self.yT = yT if yT.ndim == 2 else yT[:,None]  # terminal condition
+        self.ode_solver = ode_solver
+
+
+    def sprime(self, t, s):
+        y = s[:self.N]
+        u = s[self.N:]
+        return [*u, *(-self.g(t)@y[:,None] - self.h(t)).flatten()]
+
+
+    def IVP_objective(self, yprime0):
+        s0 = [0]*self.N + list(yprime0)
+        sol = solve_ivp(self.sprime, [0, self.T], s0)
+        return sol.y[:self.N,-1] - self.yT.flatten()
+
+
+    def solve(self, npoints: int):
+        times = np.linspace(0, self.T, npoints)
+        yprime0 = root(self.IVP_objective, self.yT.flatten()/self.T).x
+        s0 = [0]*self.N + list(yprime0)
+        sol = solve_ivp(
+            self.sprime, [0, self.T], s0,
+            method=self.ode_solver, t_eval=times
+        ).y[:self.N]
+        return times, sol
 
 
 
@@ -137,7 +189,7 @@ class OMPolySolver:
             yT: np.ndarray,
             n: int,
             method = 'Newton-CG'
-        ):
+    ):
         A0 = A(0)
         D0 = D(0)
         assert A0.shape[0] == D0.shape[0]
